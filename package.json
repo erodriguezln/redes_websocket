@@ -1,0 +1,10 @@
+{
+  "type": "module",
+  "dependencies": {
+    "winston": "^3.17.0",
+    "ws": "^8.18.3"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
