@@ -21,10 +21,10 @@ const logger = createLogger({
   level: 'info', // dfault log level
   format: format.combine(
       format.colorize({all: true}),
-      format.timestamp(),
-      format.printf(({timestamp, level, message, ...meta}) =>
-          `${timestamp} [${level.toUpperCase()}] ${message}` +
-          (Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : ''),
+      format.timestamp({format: 'HH:mm:ss'}),
+      format.printf(({timestamp, level, message, ...meta}) => {
+            return `${timestamp} [${level}]: ${message}`;
+          },
       ),
   ),
   transports: [

@@ -11,21 +11,52 @@
   let isConnecting = $state(false);
   let currentUsers = $state(0);
   let messagesContainer = $state();
+  let inputField = $state();
 
   onMount(() => {
-
+    const savedUsername = localStorage.getItem('chatUsername');
+    if (savedUsername) {
+      tempUserName = savedUsername;
+    }
   });
+
+  window.addEventListener('beforeunload', () => {
+    if (socket && isUsernameSet) {
+      disconnect();
+    }
+  });
+
+  function scrollToBottom() {
+    setTimeout(() => {
+      if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }, 10);
+  }
 
   function sendMessage() {
     if (!input.trim() || !socket) return;
-    socket.send(JSON.stringify({type: 'chat_message', message: input, username: username}));
+
+    const messageData = {
+      type: 'chat_message',
+      message: input,
+      username: username,
+    };
+
+    console.log('📤 SENDING:', JSON.stringify(messageData, null, 2));
+    socket.send(JSON.stringify(messageData));
     input = '';
+
+    if (inputField) {
+      inputField.value = '';
+    }
   }
 
   function setUsername() {
     if (tempUserName.trim()) {
       username = tempUserName.trim();
       isUsernameSet = true;
+      localStorage.setItem('chatUsername', username);
       connectWebSocket();
     }
   }
@@ -38,13 +69,26 @@
       console.info('Conectado al servidor WebSocket');
       isConnected = true;
       isConnecting = false;
-      socket.send(JSON.stringify({type: 'user_joined', username: username}));
+
+      const joinData = {type: 'user_joined', username: username};
+      console.log('📤 SENDING:', JSON.stringify(joinData, null, 2));
+      socket.send(JSON.stringify(joinData));
     });
 
     socket.addEventListener('message', ({data}) => {
+      console.log('📥 RECEIVED:', JSON.stringify(JSON.parse(data), null, 2));
+
       const msg = JSON.parse(data);
+
+      if (msg.type === 'message_history') {
+        messages = [...msg.messages];
+        scrollToBottom();
+        return;
+      }
+
       currentUsers = msg.totalUsers || currentUsers;
       messages = [...messages, msg];
+      scrollToBottom();
     });
 
     socket.addEventListener('close', () => {
@@ -155,7 +199,7 @@
               {#if type === 'message'}
                 <!-- User Message -->
                 <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded-lg">
-                  <div class="flex justify-between items-center mb-1 text-xs text-gray-500">
+                  <div class="flex justify-start gap-8 items-center mb-1 text-xs text-gray-500">
                     <span class="font-semibold text-gray-700">{username}</span>
                     <span>{new Date(timestamp).toLocaleTimeString()}</span>
                   </div>
@@ -166,7 +210,7 @@
               {:else}
                 <!-- System Message -->
                 <div class="bg-gray-50 border-l-4 border-gray-400 p-3 rounded-lg">
-                  <div class="flex justify-between items-center mb-1 text-xs text-gray-500">
+                  <div class="flex justify-start gap-8 items-center mb-1 text-xs text-gray-500">
                     <span class="font-semibold">Sistema</span>
                     <span>{new Date(timestamp).toLocaleTimeString()}</span>
                   </div>
@@ -191,9 +235,12 @@
       <div class="p-4 bg-white border-t border-gray-200">
         <div class="flex gap-3">
           <input
+              name="inputField"
+              type="text"
+              placeholder="Escribe tu mensaje..."
+              bind:this={inputField}
               bind:value={input}
               onkeypress={(e) => handleKeyPress(e, sendMessage)}
-              placeholder="Escribe tu mensaje..."
               class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
               disabled={!isConnected}
               maxlength="500"

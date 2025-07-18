@@ -4,30 +4,34 @@ import logger from './logger.js';
 
 const server = createServer();
 const wss = new WebSocketServer({server});
-
 const clients = new Map();
 
-logger.info('Servidor WebSocket iniciado en el puerto 8080');
+const messageHistory = [];
+const MAX_HISTORY = 50;
+
+logger.info('🚀 Servidor WebSocket iniciado en el puerto 8080');
 
 function broadcast(data, sender) {
   clients.forEach((clientData, client) => {
-    // If not the same client and the websocket connection is open send the data
     if (client.readyState === WebSocket.OPEN) {
       try {
         client.send(data);
+        logger.debug(`✅ Mensaje enviado exitosamente a ${clientData.username ||
+        'cliente anónimo'}`);
       } catch (error) {
-        logger.error('Error enviando mensaje: ', error);
+        logger.error(`❌ Error enviando mensaje a ${clientData.username ||
+        'cliente anónimo'}:`, error.message);
         clients.delete(client);
       }
     } else {
       clients.delete(client);
     }
   });
+
+  logger.info(`📊 Clientes activos después del broadcast: ${clients.size}`);
 }
 
 wss.on('connection', (ws) => {
-  logger.info('Nueva conexión WebSocket establecida');
-
   clients.set(ws, {
     username: null,
     connectedAt: new Date(),
@@ -35,42 +39,83 @@ wss.on('connection', (ws) => {
 
   // Mensajes de cliente a servidor
   ws.on('message', (message) => {
-    const data = JSON.parse(message);
-    //logger.info('Received message:', data);
-
     const clientData = clients.get(ws);
 
-    if (data.type === 'user_joined') {
-      clientData.username = data.username;
+    try {
+      const data = JSON.parse(message);
 
-      broadcast(JSON.stringify({
-        type: 'user_joined',
-        message: `${data.username} se ha conectado`,
-        timestamp: new Date().toISOString(),
-        totalUsers: clients.size,
-        username: data.username,
-      }), ws);
+      if (data.type === 'user_joined') {
+        logger.info(`📨 MENSAJE RECIBIDO: Nuevo usuario conectándose (${data.username})`);
+        logger.info(`👤 USUARIO SE UNE: ${data.username}`);
+        clientData.username = data.username;
 
-    } else if (data.type === 'chat_message') {
-      broadcast(JSON.stringify({
-        type: 'message',
-        message: data.message,
+        // Mensaje de bienvenida
+        const welcomeMessage = {
+          type: 'welcome',
+          message: `Bienvenido ${data.username} al servidor WebSocket`,
+          timestamp: new Date().toISOString(),
+          totalUsers: clients.size,
+          username: 'Servidor',
+        };
+
+        logger.info(`👋 Enviando mensaje de bienvenida a ${data.username}`);
+        ws.send(JSON.stringify(welcomeMessage));
+
+        // Enviar historial al nuevo usuario
+        if (messageHistory.length > 0) {
+          logger.info(`📚 Enviando historial de ${messageHistory.length} mensajes a ${data.username}`);
+          ws.send(JSON.stringify({
+            type: 'message_history',
+            messages: messageHistory,
+            timestamp: new Date().toISOString(),
+          }));
+        }
+
+        // Notificar a otros usuarios que se unió alguien nuevo
+        const joinMessage = {
+          type: 'user_joined',
+          message: `${data.username} se ha conectado`,
+          timestamp: new Date().toISOString(),
+          totalUsers: clients.size,
+          username: data.username,
+        };
+
+        logger.info(`📢 Notificando conexión de ${data.username} a todos los clientes`);
+        broadcast(JSON.stringify(joinMessage), ws);
+
+      } else if (data.type === 'chat_message') {
+        logger.info(`📨 MENSAJE RECIBIDO de ${clientData.username}`);
+        logger.info(`💬 MENSAJE DE CHAT de ${clientData.username}: "${data.message}"`);
+
+        const chatMessage = {
+          type: 'message',
+          message: data.message,
+          timestamp: new Date().toISOString(),
+          totalUsers: clients.size,
+          username: clientData.username || data.username,
+        };
+
+        messageHistory.push(chatMessage);
+        logger.info(`📝 Mensaje agregado al historial (${messageHistory.length}/${MAX_HISTORY})`);
+
+        if (messageHistory.length > MAX_HISTORY) {
+          // Elimina el mensaje más antiguo si se supera el límite
+          messageHistory.shift();
+        }
+
+        logger.info(`📡 Broadcasting mensaje de ${clientData.username} a todos los clientes`);
+        broadcast(JSON.stringify(chatMessage), ws);
+      }
+
+    } catch (error) {
+      logger.error('Error procesando mensaje:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Error procesando el mensaje',
         timestamp: new Date().toISOString(),
-        totalUsers: clients.size,
-        username: clientData.username || data.username,
-      }), ws);
+      }));
     }
-
   });
-
-  // Mensajes de servidor a cliente
-  ws.send(JSON.stringify({
-    type: 'welcome',
-    message: 'Bienvenido al servidor WebSocket',
-    timestamp: new Date().toISOString(),
-    totalUsers: clients.size,
-    username: 'Servidor',
-  }));
 
   ws.on('error', (error) => {
     logger.error('WebSocket error:', error);
@@ -78,16 +123,21 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     const clientData = clients.get(ws);
-    logger.info('Client disconnected');
+    logger.info(`🔌 DESCONEXIÓN: ${clientData?.username}`);
     clients.delete(ws);
 
-    broadcast(JSON.stringify({
+    if (clientData?.username) {
+    const disconnectMessage = {
       type: 'user_left',
       message: `${clientData.username} se ha desconectado`,
       timestamp: new Date().toISOString(),
       totalUsers: clients.size,
       username: 'Servidor',
-    }), ws);
+    };
+
+      logger.info(`📢 Notificando desconexión de ${clientData.username} a todos los clientes`);
+    broadcast(JSON.stringify(disconnectMessage), ws);
+    }
   });
 });
 
